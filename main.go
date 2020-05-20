@@ -1,16 +1,15 @@
 package main
 
 import (
-	"github.com/ontio/ontology-go-sdk"
 	"fmt"
-	"github.com/ontio/ontology/common"
-	"github.com/ontio/ontology-go-sdk/examples/define"
-	"github.com/ontio/ontology/core/utils"
-	"time"
+	"github.com/ontio/ontology-go-sdk"
 	common2 "github.com/ontio/ontology-go-sdk/common"
+	"github.com/ontio/ontology/common"
+	"github.com/ontio/testcontract/define"
+	"time"
 )
 
-var resource_id = []byte("reso_1")    //test param can be changed
+var resource_id = []byte("reso_1") //test param can be changed
 
 func main() {
 	fmt.Println("==========================start============================")
@@ -25,7 +24,8 @@ func main() {
 	var seller *ontology_go_sdk.Account
 	var buyer *ontology_go_sdk.Account
 	var agent *ontology_go_sdk.Account
-	wallet, err := ontSdk.OpenWallet("./wallet.dat")
+	var payer *ontology_go_sdk.Account
+	wallet, err := ontSdk.OpenWallet("/Users/sss/gopath/src/github.com/ontio/ontology-go-sdk/wallet.dat")
 	if err != nil {
 		fmt.Println("OpenWallet error: ", err)
 		return
@@ -33,28 +33,30 @@ func main() {
 	if false {
 		seller, _ = wallet.NewDefaultSettingAccount(pwd)
 		buyer, _ = wallet.NewDefaultSettingAccount(pwd)
+		payer, _ = wallet.NewDefaultSettingAccount(pwd)
 		wallet.Save()
+		fmt.Println(payer.Address.ToBase58())
 		fmt.Printf("seller:%s, buyer:%s\n", seller.Address.ToBase58(), buyer.Address.ToBase58())
 		return
 	} else {
 		seller, _ = wallet.GetAccountByAddress("Aejfo7ZX5PVpenRj23yChnyH64nf8T1zbu", pwd)
 		buyer, _ = wallet.GetAccountByAddress("AHhXa11suUgVLX1ZDFErqBd3gskKqLfa5N", pwd)
 		agent, _ = wallet.GetAccountByAddress("ANb3bf1b67WP2ZPh5HQt4rkrmphMJmMCMK", pwd)
+		payer, _ = wallet.GetAccountByAddress("AYFCTHpEwDRXL6Pm6kYQYZhWCd5Wjg2WDz", pwd)
 	}
 
 	fmt.Printf("seller:%s, buyer:%s\n", seller.Address.ToBase58(), buyer.Address.ToBase58())
 
+	contractAddr, _ := common.AddressFromHexString("cced027658a9bb906644c7011836aa17e17125e5")
 
-	contractAddr,_ := common.AddressFromHexString("")
-
-	ddxf := NewDDXF(ontSdk, contractAddr)
+	ddxf := NewDDXF(ontSdk, contractAddr, payer)
 	fmt.Printf("contractAddr:%s, contractAddr:%s\n", contractAddr.ToBase58(), contractAddr.ToHexString())
 
 	showOngBalance(ontSdk, seller.Address, buyer.Address)
 
 	//test ddxf contract
 	if true {
-		tokenHash := make([]byte, 32)    //test param can be changed, only the length is 32 can be success,other will be failed.
+		tokenHash := make([]byte, 32) //test param can be changed, only the length is 32 can be success,other will be failed.
 		template := define.TokenTemplate{
 			DataIDs:   "",
 			TokenHash: string(tokenHash),
@@ -77,7 +79,7 @@ func main() {
 			showOngBalance(ontSdk, seller.Address, buyer.Address)
 			return
 		}
-		//消耗dtoken
+		//购买者消耗dtoken
 		if false {
 			// 第一个参数resource_id 用来标识购买的哪个商品，
 			// 第二个参数 1是消耗的数量
@@ -89,9 +91,18 @@ func main() {
 		//添加代理
 		if false {
 			param := []interface{}{resource_id, buyer.Address, []interface{}{agent.Address}, 1}
-			bs, _ := utils.BuildWasmContractParam(param)
-			fmt.Println(common.ToHexString(bs))
 			ddxf.invoke(buyer, "addAgents", param)
+			return
+		}
+		// 代理消耗dtoken
+		if true {
+			// 第一个参数resource_id 用来标识购买的哪个商品，
+			// 第二个参数 授权方地址
+			// 第三个参数 代理地址
+			// 第四个参数  template
+			// 第五个参数 消耗数量
+			param := []interface{}{resource_id, buyer.Address, agent.Address, template.ToBytes(), 1}
+			ddxf.invoke(agent, "useTokenByAgent", param)
 			return
 		}
 	}
@@ -142,15 +153,17 @@ type DDXF struct {
 	gasPrice        uint64
 	contractAddress common.Address
 	timeoutSec      time.Duration
+	payer           *ontology_go_sdk.Account
 }
 
-func NewDDXF(sdk *ontology_go_sdk.OntologySdk, contractAddress common.Address) *DDXF {
+func NewDDXF(sdk *ontology_go_sdk.OntologySdk, contractAddress common.Address, payer *ontology_go_sdk.Account) *DDXF {
 	return &DDXF{
 		sdk:             sdk,
 		gasLimit:        200000000,
 		gasPrice:        500,
 		contractAddress: contractAddress,
 		timeoutSec:      30 * time.Second,
+		payer:           payer,
 	}
 }
 
@@ -193,7 +206,7 @@ func (this *DDXF) preInvoke(method string, param []interface{}) (*common2.Result
 }
 
 func (this *DDXF) invoke(signer *ontology_go_sdk.Account, method string, param []interface{}) error {
-	txhash, err := this.sdk.WasmVM.InvokeWasmVMSmartContract(this.gasPrice, this.gasLimit, signer, signer, this.contractAddress, method, param)
+	txhash, err := this.sdk.WasmVM.InvokeWasmVMSmartContract(this.gasPrice, this.gasLimit, this.payer, signer, this.contractAddress, method, param)
 	if err != nil {
 		fmt.Println("InvokeWasmVMSmartContract error ", err)
 		return err
